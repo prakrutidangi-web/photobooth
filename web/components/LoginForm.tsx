@@ -13,6 +13,7 @@ export default function LoginForm({ next, urlError }: { next: string; urlError: 
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(urlError ? { kind: 'err', text: 'Sign-in failed. Please try again.' } : null);
   const [loading, setLoading] = useState(false);
   const dest = safeNext(next);
+  const googleOn = process.env.NEXT_PUBLIC_GOOGLE_ENABLED === 'true';
 
   if (!supabaseConfigured) return (
     <div className="error" role="alert"><strong>Login isn't configured yet.</strong>Copy <code>.env.local.example</code> to <code>.env.local</code> and add your Supabase URL and anon key (see README).</div>
@@ -49,8 +50,8 @@ export default function LoginForm({ next, urlError }: { next: string; urlError: 
           <button key={m} role="tab" aria-selected={mode === m} className={mode === m ? 'on' : ''} onClick={() => { setMode(m); setMsg(null); }}>{m === 'in' ? 'Sign in' : 'Create account'}</button>
         ))}
       </div>
-      <button type="button" className="btn google" onClick={google}>Continue with Google</button>
-      <div className="or"><span>or</span></div>
+      {googleOn && <><button type="button" className="btn google" onClick={google}>Continue with Google</button>
+      <div className="or"><span>or</span></div></>}
       <form onSubmit={submit} noValidate>
         <label>Email<input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} /></label>
         <label>Password<input type="password" autoComplete={mode === 'in' ? 'current-password' : 'new-password'} required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} maxLength={128} /></label>

@@ -10,7 +10,7 @@ function buildCsp(nonce: string, path: string) {
 
   const d: Record<string, string[]> = {
     'default-src': ["'self'"],
-    'script-src': ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", ...(dev ? ["'unsafe-eval'"] : [])],
+    'script-src': ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", "'wasm-unsafe-eval'" /* on-device face model (WebAssembly) */, ...(dev ? ["'unsafe-eval'"] : [])],
     'style-src': ["'self'", "'unsafe-inline'"], // inline style attributes (React/Framer); scripts stay strict
     'img-src': ["'self'", 'blob:', 'data:', ...(adsOn ? ['https:'] : [])],
     'media-src': ["'self'", 'blob:'],
@@ -58,13 +58,6 @@ export async function proxy(request: NextRequest) {
   }
 
   const path = request.nextUrl.pathname;
-  if (path.startsWith('/studio') && !user) {
-    const to = request.nextUrl.clone();
-    to.pathname = '/login'; to.search = '?next=/studio';
-    const redirect = NextResponse.redirect(to);
-    redirect.headers.set('Content-Security-Policy', csp);
-    return redirect;
-  }
   if (path === '/login' && user) {
     const to = request.nextUrl.clone();
     to.pathname = '/studio'; to.search = '';

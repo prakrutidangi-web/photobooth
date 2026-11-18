@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
-import { Footer, Marquee } from '@/components/Sign';
+import { SiteNav, SiteFooter } from '@/components/site/Chrome';
 export const metadata: Metadata = { title: 'Privacy Policy' };
 export default function Privacy() {
-  return (<>
-    <header className="sign"><Marquee /></header>
+  return (<div className="site page">
+    <SiteNav />
     <main id="main" className="wrap narrow prose">
       <h1 className="h2">Privacy Policy</h1>
       <p className="muted">Last updated: November 17, 2026. Template: have it reviewed for your jurisdiction before launch.</p>
@@ -12,5 +12,5 @@ export default function Privacy() {
       <h2>Advertising</h2><p>Our public pages may show ads from Google AdSense, which may use cookies. We only load ads after you accept. You can change your choice by clearing this site's data.</p>
       <h2>Your rights</h2><p>You can ask us to delete your account at any time by contacting us at the address below.</p>
       <h2>Contact</h2><p>[your contact email]</p>
-    </main><Footer /></>);
+    </main><SiteFooter /></div>);
 }
