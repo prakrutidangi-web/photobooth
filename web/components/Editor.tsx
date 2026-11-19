@@ -4,9 +4,10 @@ import { motion } from 'framer-motion';
 import { STYLES } from '@/lib/filters';
 import type { Pose } from '@/lib/poses';
 import {
-  FONTS, FRAMES, LAYOUTS, STICKERS, buildBase, customFrame, drawItems, itemBox, printVideo, saveBlob, sizeOf, storyCanvas, toPng,
-  type FontKey, type Item,
+  FONTS, FRAMES, LAYOUTS, STICKERS, TEXT_STYLES, buildBase, customFrame, drawItems, itemBox, printVideo, saveBlob, sizeOf, storyCanvas, toPng,
+  type FontKey, type Item, type TextStyle,
 } from '@/lib/studio';
+import { DECOR, DECOR_CATS, PALETTE, THEMES, byKey, decorBitmap, decorUrl, type DecorCat } from '@/lib/decor';
 
 type Props = { photos: HTMLCanvasElement[]; layoutId: string; lookId: string; frameId?: string; poses: Pose[] | null; onRetake: () => void; onNew: () => void };
 type NewItem = Item extends infer I ? (I extends { id: number } ? Omit<I, 'id'> : never) : never;
@@ -23,14 +24,19 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
   const [mode, setMode] = useState<'move' | 'draw'>('move');
   const [pen, setPen] = useState({ color: '#f0a24a', w: 0.008 });
   const [text, setText] = useState('');
-  const [font, setFont] = useState<FontKey>('typewriter');
-  const [tcolor, setTcolor] = useState('#ffffff');
+  const [font, setFont] = useState<FontKey>('hand');
+  const [tstyle, setTstyle] = useState<TextStyle>('plain');
+  const [tcolor, setTcolor] = useState('#FFFFFF');
+  const [cat, setCat] = useState<DecorCat | 'emoji'>('cute');
+  const [themeId, setThemeId] = useState<string | null>(null);
+  const [, setArtTick] = useState(0);
   const [base, setBase] = useState<HTMLCanvasElement | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const display = useRef<HTMLCanvasElement>(null);
   const cache = useRef(new Map<string, HTMLCanvasElement>());
   const nextId = useRef(1);
+  const getArt = (it: Extract<Item, { type: 'art' }>) => decorBitmap(it.key, it.color, () => setArtTick((t) => t + 1));
   const drag = useRef<{ id: number; dx: number; dy: number } | null>(null);
   const drawing = useRef<number | null>(null);
 
@@ -47,12 +53,12 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
     const c = display.current; if (!c || !base) return;
     c.width = base.width; c.height = base.height;
     const ctx = c.getContext('2d')!; ctx.drawImage(base, 0, 0);
-    drawItems(ctx, items, c.width, c.height, sel);
-  }, [base, items, sel]);
+    drawItems(ctx, items, c.width, c.height, sel, getArt);
+  }); // redraws every render: cheap, and picks up stickers as their bitmaps finish loading
 
   const final = () => {
     const c = document.createElement('canvas'); c.width = base!.width; c.height = base!.height;
-    const ctx = c.getContext('2d')!; ctx.drawImage(base!, 0, 0); drawItems(ctx, items, c.width, c.height); return c;
+    const ctx = c.getContext('2d')!; ctx.drawImage(base!, 0, 0); drawItems(ctx, items, c.width, c.height, null, getArt); return c;
   };
   const stamp = () => `photobooth-${layout.id}-${look.id}`;
   const run = async (label: string, fn: () => Promise<void>) => {
@@ -67,6 +73,17 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
   const add = (it: NewItem) => { const id = nextId.current++; setItems((l) => [...l, { ...it, id } as Item]); setSel(id); setMode('move'); };
   const patchSel = (p: Record<string, unknown>) => setItems((l) => l.map((i) => (i.id === sel ? ({ ...i, ...p } as Item) : i)));
   const selItem = items.find((i) => i.id === sel);
+  const tilt = () => Math.round(Math.random() * 16 - 8);
+  const addArt = (key: string) => { const d = byKey(key)!; add({ type: 'art', key, x: 0.5, y: 0.5, s: d.cat === 'tape' ? (d.w > 100 ? 0.42 : 0.12) : d.cat === 'words' ? 0.32 : 0.2, r: tilt(), color: d.tint ? (d.key === 't-corner' ? '#2A0810' : '#D91F3F') : undefined }); };
+  const applyTheme = (id: string) => {
+    const t = THEMES.find((x) => x.id === id)!;
+    setItems((l) => [...l.filter((i) => !(i.type === 'art' && i.theme)), ...t.items.map((p) => ({ id: nextId.current++, type: 'art' as const, ...p, theme: true }))]);
+    setThemeId(id); setSel(null);
+  };
+  const clearTheme = () => { setItems((l) => l.filter((i) => !(i.type === 'art' && i.theme))); setThemeId(null); };
+  const toFront = () => setItems((l) => { const it = l.find((i) => i.id === sel); return it ? [...l.filter((i) => i !== it), it] : l; });
+  const duplicate = () => { if (selItem && selItem.type !== 'stroke') add({ ...selItem, x: selItem.x + 0.04, y: selItem.y + 0.03 } as NewItem); };
+  const recolor = (c: string) => { setTcolor(c); if (selItem?.type === 'text' || (selItem?.type === 'art' && byKey(selItem.key)?.tint)) patchSel({ color: c }); };
 
   const pos = (e: React.PointerEvent) => {
     const c = display.current!, r = c.getBoundingClientRect();
@@ -80,7 +97,7 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
     }
     const ctx = c.getContext('2d')!;
     for (const it of [...items].reverse()) {
-      const b = itemBox(ctx, it, c.width, c.height);
+      const b = itemBox(ctx, it, c.width, c.height, getArt);
       if (b && p.x * c.width >= b.x - 10 && p.x * c.width <= b.x + b.w + 10 && p.y * c.height >= b.y - 10 && p.y * c.height <= b.y + b.h + 10) {
         setSel(it.id); drag.current = { id: it.id, dx: (it as { x: number }).x - p.x, dy: (it as { y: number }).y - p.y }; return;
       }
@@ -139,29 +156,71 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
         </>)}
 
         {tab === 'decorate' && (<>
+          <h3 className="eyebrow">Themes</h3>
+          <div className="themes">
+            {THEMES.map((t) => (
+              <button key={t.id} className="theme" aria-pressed={themeId === t.id} onClick={() => applyTheme(t.id)}>
+                <span className="th-art">{t.preview.map((k) => { const d = byKey(k)!; /* eslint-disable-next-line @next/next/no-img-element */ return <img key={k} src={decorUrl(d)} alt="" />; })}</span>
+                <span>{t.name}</span>
+              </button>
+            ))}
+          </div>
+          {themeId && <button className="txt" onClick={clearTheme}>remove theme</button>}
+
           <h3 className="eyebrow">Stickers</h3>
-          <div className="stickers">{STICKERS.map((s) => <button key={s} onClick={() => add({ type: 'sticker', ch: s, x: 0.5, y: 0.5, s: 0.18 })} aria-label={`Add ${s}`}>{s}</button>)}</div>
+          <div className="dtabs" role="tablist">
+            {[...DECOR_CATS, { id: 'emoji' as const, name: 'emoji' }].map((c) => <button key={c.id} role="tab" aria-selected={cat === c.id} onClick={() => setCat(c.id)}>{c.name}</button>)}
+          </div>
+          <div className={`dgrid ${cat}`}>
+            {cat === 'emoji'
+              ? STICKERS.map((e) => <button key={e} className="demoji" onClick={() => add({ type: 'sticker', ch: e, x: 0.5, y: 0.5, s: 0.16, r: tilt() })} aria-label={`Add ${e}`}>{e}</button>)
+              : DECOR.filter((d) => d.cat === cat).map((d) => (
+                <button key={d.key} onClick={() => addArt(d.key)} aria-label={`Add ${d.name}`} title={d.name}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={decorUrl(d, d.key === 't-corner' ? '#2A0810' : '#D91F3F')} alt="" />
+                </button>
+              ))}
+          </div>
+
           <h3 className="eyebrow">Text</h3>
           <div className="textrow">
-            <input value={text} onChange={(e) => setText(e.target.value)} maxLength={40} placeholder="Add a caption..." aria-label="Caption text" />
-            <button className="btn small primary" disabled={!text.trim()} onClick={() => { add({ type: 'text', text: text.trim(), x: 0.5, y: layout.id === 'polaroid' ? 0.88 : 0.5, s: 0.07, color: tcolor, font }); setText(''); }}>Add</button>
+            <input value={text} onChange={(e) => { setText(e.target.value); if (selItem) setSel(null); /* new caption: style picks apply to it, not the old one */ }} maxLength={40} placeholder="add a caption..." aria-label="Caption text" />
+            <button className="btn small primary" disabled={!text.trim()} onClick={() => { add({ type: 'text', text: text.trim(), x: 0.5, y: layout.id.startsWith('polaroid') ? 0.9 : 0.5, s: 0.075, r: 0, color: tcolor, font, style: tstyle }); setText(''); }}>Add</button>
           </div>
-          <div className="textrow">
-            <select value={font} onChange={(e) => setFont(e.target.value as FontKey)} aria-label="Font">{(Object.keys(FONTS) as FontKey[]).map((f) => <option key={f} value={f}>{f}</option>)}</select>
-            <input type="color" value={tcolor} onChange={(e) => { setTcolor(e.target.value); if (selItem?.type === 'text') patchSel({ color: e.target.value }); }} aria-label="Text colour" />
+          <div className="fontrow" role="radiogroup" aria-label="Font">
+            {(Object.keys(FONTS) as FontKey[]).map((f) => (
+              <button key={f} role="radio" aria-checked={font === f} className={`ff ff-${f}`} onClick={() => { setFont(f); if (selItem?.type === 'text') patchSel({ font: f }); }}>Aa<small>{FONTS[f].label}</small></button>
+            ))}
           </div>
+          <div className="seg" role="radiogroup" aria-label="Text style">
+            {TEXT_STYLES.map((t) => <button key={t} role="radio" aria-checked={tstyle === t} onClick={() => { setTstyle(t); if (selItem?.type === 'text') patchSel({ style: t }); }}>{t}</button>)}
+          </div>
+          <div className="palette" role="radiogroup" aria-label="Colour">
+            {PALETTE.map((c) => <button key={c} role="radio" aria-checked={tcolor === c} aria-label={c} style={{ background: c }} onClick={() => recolor(c)} />)}
+            <input type="color" value={tcolor} onChange={(e) => recolor(e.target.value)} aria-label="Custom colour" />
+          </div>
+
+          {selItem && selItem.type !== 'stroke' && (
+            <div className="selbox">
+              <label className="colorrow">Size<input type="range" min={0.03} max={selItem.type === 'art' ? 1 : 0.5} step={0.005} value={selItem.s} onChange={(e) => patchSel({ s: +e.target.value })} /></label>
+              <label className="colorrow">Rotate<input type="range" min={-180} max={180} step={1} value={selItem.r ?? 0} onChange={(e) => patchSel({ r: +e.target.value })} /></label>
+              <div className="textrow">
+                <button className="btn small" onClick={toFront}>Bring to front</button>
+                <button className="btn small" onClick={duplicate}>Duplicate</button>
+                <button className="btn small" onClick={() => { setItems((l) => l.filter((i) => i.id !== sel)); setSel(null); }}>Delete</button>
+              </div>
+            </div>
+          )}
+
           <h3 className="eyebrow">Draw</h3>
           <div className="textrow">
-            <button className="btn small" aria-pressed={mode === 'draw'} onClick={() => setMode(mode === 'draw' ? 'move' : 'draw')}>{mode === 'draw' ? 'Drawing: on' : 'Pen: off'}</button>
+            <button className="btn small" aria-pressed={mode === 'draw'} onClick={() => setMode(mode === 'draw' ? 'move' : 'draw')}>{mode === 'draw' ? 'Pen: on' : 'Pen: off'}</button>
             <input type="color" value={pen.color} onChange={(e) => setPen({ ...pen, color: e.target.value })} aria-label="Pen colour" />
             <input type="range" min={0.003} max={0.03} step={0.001} value={pen.w} onChange={(e) => setPen({ ...pen, w: +e.target.value })} aria-label="Pen size" />
           </div>
-          {selItem && selItem.type !== 'stroke' && (
-            <label className="colorrow">Size<input type="range" min={0.03} max={0.5} step={0.005} value={selItem.s} onChange={(e) => patchSel({ s: +e.target.value })} /></label>
-          )}
           <div className="textrow">
-            <button className="btn small" disabled={sel == null} onClick={() => { setItems((l) => l.filter((i) => i.id !== sel)); setSel(null); }}>Delete selected</button>
             <button className="btn small" disabled={!items.length} onClick={() => { setItems((l) => l.slice(0, -1)); setSel(null); }}>Undo</button>
+            <button className="btn small" disabled={!items.length} onClick={() => { setItems([]); setSel(null); setThemeId(null); }}>Clear all</button>
           </div>
         </>)}
 

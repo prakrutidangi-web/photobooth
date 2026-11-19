@@ -98,51 +98,94 @@ export function buildBase(raw: HTMLCanvasElement[], L: Layout, look: StripStyle,
 }
 
 /* ---------- Stickers / text / drawing ---------- */
-export const STICKERS = ['⭐', '❤️', '✨', '🎀', '🌸', '😎', '🎄', '☁️', '🦋', '🌈', '💋', '🍒', '📸', '🎞️', '🕶️', '🔥'];
+export const STICKERS = ['⭐', '❤️', '✨', '🎀', '🌸', '😎', '🦋', '🌈', '💋', '🍒', '📸', '🔥'];
+
+/** Text fonts are the site's own (next/font), read from their CSS variables at draw time. */
 export const FONTS = {
-  typewriter: '"American Typewriter","Courier New",monospace',
-  script: '"Snell Roundhand","Brush Script MT",cursive',
-  bold: '"Avenir Next","Helvetica Neue",Arial,sans-serif',
+  hand: { label: 'handwritten', v: '--font-hand', w: '600', fb: 'cursive' },
+  serif: { label: 'serif', v: '--font-serif', w: '400', fb: 'Georgia,serif' },
+  italic: { label: 'italic', v: '--font-italic', w: 'italic 400', fb: 'Georgia,serif' },
+  type: { label: 'typewriter', v: '--font-mono', w: '500', fb: '"Courier New",monospace' },
+  bold: { label: 'bold', v: '--font-sans', w: '800', fb: 'Arial,sans-serif' },
 } as const;
 export type FontKey = keyof typeof FONTS;
+export const TEXT_STYLES = ['plain', 'outline', 'pill', 'label'] as const;
+export type TextStyle = (typeof TEXT_STYLES)[number];
+const famCache = new Map<string, string>();
+const family = (k: FontKey) => {
+  if (!famCache.has(k) && typeof document !== 'undefined') {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(FONTS[k].v).trim();
+    famCache.set(k, `${v ? v + ',' : ''}${FONTS[k].fb}`);
+  }
+  return famCache.get(k) ?? FONTS[k].fb;
+};
+const fontFor = (k: FontKey, px: number) => `${FONTS[k].w} ${px}px ${family(k)}`;
 
 export type Item =
-  | { id: number; type: 'sticker'; ch: string; x: number; y: number; s: number }
-  | { id: number; type: 'text'; text: string; x: number; y: number; s: number; color: string; font: FontKey }
+  | { id: number; type: 'sticker'; ch: string; x: number; y: number; s: number; r?: number }
+  | { id: number; type: 'art'; key: string; x: number; y: number; s: number; r?: number; color?: string; theme?: boolean }
+  | { id: number; type: 'text'; text: string; x: number; y: number; s: number; r?: number; color: string; font: FontKey; style?: TextStyle }
   | { id: number; type: 'stroke'; pts: [number, number][]; color: string; w: number };
 
-const setFont = (ctx: CanvasRenderingContext2D, it: Item, W: number) => {
-  if (it.type === 'sticker') ctx.font = `${it.s * W}px "Apple Color Emoji","Segoe UI Emoji",sans-serif`;
-  if (it.type === 'text') ctx.font = `700 ${it.s * W}px ${FONTS[it.font]}`;
-};
+/** Art is sized against the short side so themes look the same on strips, grids and wide prints. */
+const artPx = (s: number, W: number, H: number) => s * Math.min(W, H);
+const ink = (hex: string) => { const n = parseInt(hex.slice(1), 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 150 ? '#2A0810' : '#FFFFFF'; };
 
-export function itemBox(ctx: CanvasRenderingContext2D, it: Item, W: number, H: number) {
+export function itemBox(ctx: CanvasRenderingContext2D, it: Item, W: number, H: number, getArt?: (it: Extract<Item, { type: 'art' }>) => HTMLCanvasElement | null) {
   if (it.type === 'stroke') return null;
-  setFont(ctx, it, W);
-  const w = it.type === 'sticker' ? it.s * W * 1.1 : ctx.measureText(it.text).width;
-  const h = it.s * W * 1.2;
+  let w: number, h: number;
+  if (it.type === 'sticker') { w = it.s * W * 1.1; h = it.s * W * 1.2; }
+  else if (it.type === 'art') { const bm = getArt?.(it); const L = artPx(it.s, W, H); w = bm ? (bm.width >= bm.height ? L : (L * bm.width) / bm.height) : L; h = bm ? (bm.width >= bm.height ? (L * bm.height) / bm.width : L) : L; }
+  else { ctx.font = fontFor(it.font, it.s * W); w = ctx.measureText(it.text).width + (it.style === 'pill' || it.style === 'label' ? it.s * W * 1.2 : 0); h = it.s * W * 1.5; }
   return { x: it.x * W - w / 2, y: it.y * H - h / 2, w, h };
 }
 
-export function drawItems(ctx: CanvasRenderingContext2D, items: Item[], W: number, H: number, selId?: number | null) {
+function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+
+export function drawItems(ctx: CanvasRenderingContext2D, items: Item[], W: number, H: number, selId?: number | null, getArt?: (it: Extract<Item, { type: 'art' }>) => HTMLCanvasElement | null) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const it of items) {
     if (it.type === 'stroke') {
       ctx.strokeStyle = it.color; ctx.lineWidth = it.w * W; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.beginPath(); it.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x * W, y * H) : ctx.moveTo(x * W, y * H)));
       if (it.pts.length === 1) ctx.lineTo(it.pts[0][0] * W + 0.1, it.pts[0][1] * H);
-      ctx.stroke();
-    } else if (it.type === 'sticker') {
-      setFont(ctx, it, W); ctx.fillText(it.ch, it.x * W, it.y * H);
-    } else {
-      setFont(ctx, it, W); ctx.fillStyle = it.color;
-      ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = it.s * W * 0.15;
-      ctx.fillText(it.text, it.x * W, it.y * H); ctx.shadowBlur = 0;
+      ctx.stroke(); continue;
     }
+    ctx.save(); ctx.translate(it.x * W, it.y * H); ctx.rotate(((it.r ?? 0) * Math.PI) / 180);
+    if (it.type === 'sticker') {
+      ctx.font = `${it.s * W}px "Apple Color Emoji","Segoe UI Emoji",sans-serif`; ctx.fillText(it.ch, 0, 0);
+    } else if (it.type === 'art') {
+      const bm = getArt?.(it), b = itemBox(ctx, it, W, H, getArt);
+      if (bm && b) ctx.drawImage(bm, -b.w / 2, -b.h / 2, b.w, b.h);
+    } else {
+      const px = it.s * W; ctx.font = fontFor(it.font, px);
+      const tw = ctx.measureText(it.text).width, style = it.style ?? 'plain';
+      if (style === 'pill' || style === 'label') {
+        const padX = px * 0.6, bh = px * 1.45;
+        ctx.shadowColor = 'rgba(0,0,0,.25)'; ctx.shadowBlur = px * 0.25; ctx.shadowOffsetY = px * 0.08;
+        ctx.fillStyle = it.color;
+        if (style === 'pill') rr(ctx, -tw / 2 - padX, -bh / 2, tw + padX * 2, bh, bh / 2);
+        else rr(ctx, -tw / 2 - padX, -bh / 2, tw + padX * 2, bh, px * 0.12);
+        ctx.fill(); ctx.shadowColor = 'transparent';
+        if (style === 'label') { ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = px * 0.05; ctx.stroke(); }
+        ctx.fillStyle = ink(it.color); ctx.fillText(it.text, 0, px * 0.04);
+      } else if (style === 'outline') {
+        ctx.lineJoin = 'round'; ctx.strokeStyle = ink(it.color) === '#2A0810' ? '#2A0810' : '#FFFFFF'; ctx.lineWidth = px * 0.22;
+        ctx.strokeText(it.text, 0, 0); ctx.fillStyle = it.color; ctx.fillText(it.text, 0, 0);
+      } else {
+        ctx.fillStyle = it.color; ctx.shadowColor = 'rgba(0,0,0,.3)'; ctx.shadowBlur = px * 0.15;
+        ctx.fillText(it.text, 0, 0);
+      }
+    }
+    ctx.restore();
   }
   if (selId != null) {
-    const it = items.find((i) => i.id === selId), b = it && itemBox(ctx, it, W, H);
-    if (b) { ctx.save(); ctx.strokeStyle = '#f0a24a'; ctx.lineWidth = Math.max(2, W / 300); ctx.setLineDash([10, 8]); ctx.strokeRect(b.x - 6, b.y - 6, b.w + 12, b.h + 12); ctx.restore(); }
+    const it = items.find((i) => i.id === selId), b = it && itemBox(ctx, it, W, H, getArt);
+    if (it && b && it.type !== 'stroke') {
+      ctx.save(); ctx.translate(it.x * W, it.y * H); ctx.rotate(((it.r ?? 0) * Math.PI) / 180);
+      ctx.strokeStyle = '#D91F3F'; ctx.lineWidth = Math.max(2, W / 300); ctx.setLineDash([10, 8]);
+      ctx.strokeRect(-b.w / 2 - 6, -b.h / 2 - 6, b.w + 12, b.h + 12); ctx.restore();
+    }
   }
 }
 
