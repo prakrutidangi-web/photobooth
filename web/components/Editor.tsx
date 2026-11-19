@@ -7,11 +7,12 @@ import {
   FONTS, FRAMES, LAYOUTS, STICKERS, TEXT_STYLES, buildBase, customFrame, drawItems, itemBox, printVideo, saveBlob, sizeOf, storyCanvas, toPng,
   type FontKey, type Item, type TextStyle,
 } from '@/lib/studio';
+import { SCENE_LAYOUTS, SCENE_THEMES, renderScene, type SceneLayout } from '@/lib/scene';
 import { DECOR, DECOR_CATS, PALETTE, THEMES, byKey, decorBitmap, decorUrl, type DecorCat } from '@/lib/decor';
 
 type Props = { photos: HTMLCanvasElement[]; layoutId: string; lookId: string; frameId?: string; poses: Pose[] | null; onRetake: () => void; onNew: () => void };
 type NewItem = Item extends infer I ? (I extends { id: number } ? Omit<I, 'id'> : never) : never;
-type Tab = 'look' | 'frame' | 'decorate';
+type Tab = 'look' | 'frame' | 'decorate' | 'scene';
 
 export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 'cream', poses, onRetake, onNew }: Props) {
   const [layoutSel, setLayoutSel] = useState(layoutId);
@@ -30,6 +31,11 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
   const [cat, setCat] = useState<DecorCat | 'emoji'>('cute');
   const [themeId, setThemeId] = useState<string | null>(null);
   const [, setArtTick] = useState(0);
+  const [sceneTheme, setSceneTheme] = useState('gingham');
+  const [sceneLayout, setSceneLayout] = useState<SceneLayout>('single');
+  const [caption, setCaption] = useState('');
+  const sceneRef = useRef<HTMLCanvasElement>(null);
+  const [sceneReady, setSceneReady] = useState(false);
   const [base, setBase] = useState<HTMLCanvasElement | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -61,6 +67,19 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
     const ctx = c.getContext('2d')!; ctx.drawImage(base!, 0, 0); drawItems(ctx, items, c.width, c.height, null, getArt); return c;
   };
   const stamp = () => `photobooth-${layout.id}-${look.id}`;
+
+  // square scene preview (re-rendered when anything that affects it changes)
+  useEffect(() => {
+    if (tab !== 'scene' || !base) return;
+    let alive = true; setSceneReady(false);
+    const t = setTimeout(async () => {
+      const sc = await renderScene(final(), sceneTheme, sceneLayout, caption, 1000);
+      const c = sceneRef.current; if (!alive || !c) return;
+      c.width = sc.width; c.height = sc.height; c.getContext('2d')!.drawImage(sc, 0, 0); setSceneReady(true);
+    }, 120);
+    return () => { alive = false; clearTimeout(t); };
+  }, [tab, base, items, sceneTheme, sceneLayout, caption]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dlScene = () => run('Saving...', async () => saveBlob(await toPng(await renderScene(final(), sceneTheme, sceneLayout, caption, 2048)), `${stamp()}-${sceneTheme}-square.png`));
   const run = async (label: string, fn: () => Promise<void>) => {
     setErr(''); setBusy(label);
     try { await fn(); } catch (e) { setErr(e instanceof Error ? e.message : 'Something went wrong.'); } finally { setBusy(''); }
@@ -115,7 +134,8 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
   return (
     <div className="editor">
       <div className="stage">
-        <motion.canvas ref={display} className={`strip ${mode === 'draw' ? 'pen' : ''}`} style={{ aspectRatio: `${W} / ${H}` }}
+        {tab === 'scene' && <canvas ref={sceneRef} className={`scene-cv ${sceneReady ? 'on' : ''}`} role="img" aria-label="Square post preview" />}
+        <motion.canvas hidden={tab === 'scene'} ref={display} className={`strip ${mode === 'draw' ? 'pen' : ''}`} style={{ aspectRatio: `${W} / ${H}` }}
           initial={{ y: -30, opacity: 0, rotate: -2 }} animate={{ y: 0, opacity: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 110, damping: 16 }}
           onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
           role="img" aria-label={`Your ${layout.name}, ${look.name} look. Drag stickers and text to move them.`} />
@@ -123,8 +143,8 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
 
       <div className="panel-side">
         <div className="tabs3" role="tablist">
-          {(['look', 'frame', 'decorate'] as Tab[]).map((t) => (
-            <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t === 'look' ? 'Look' : t === 'frame' ? 'Frame' : 'Decorate'}</button>
+          {(['look', 'frame', 'decorate', 'scene'] as Tab[]).map((t) => (
+            <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{{ look: 'Look', frame: 'Frame', decorate: 'Decorate', scene: 'Square' }[t]}</button>
           ))}
         </div>
 
@@ -222,6 +242,24 @@ export default function Editor({ photos, layoutId, lookId, frameId: frameInit = 
             <button className="btn small" disabled={!items.length} onClick={() => { setItems((l) => l.slice(0, -1)); setSel(null); }}>Undo</button>
             <button className="btn small" disabled={!items.length} onClick={() => { setItems([]); setSel(null); setThemeId(null); }}>Clear all</button>
           </div>
+        </>)}
+
+        {tab === 'scene' && (<>
+          <h3 className="eyebrow">Backdrop</h3>
+          <div className="scenes">
+            {SCENE_THEMES.map((t) => (
+              <button key={t.id} className="scene-t" aria-pressed={sceneTheme === t.id} onClick={() => setSceneTheme(t.id)}>
+                <i style={{ background: t.swatch }} /><span>{t.name}</span>
+              </button>
+            ))}
+          </div>
+          <h3 className="eyebrow">Layout</h3>
+          <div className="seg" role="radiogroup" aria-label="Scene layout">
+            {SCENE_LAYOUTS.map((l) => <button key={l.id} role="radio" aria-checked={sceneLayout === l.id} onClick={() => setSceneLayout(l.id)}>{l.name}</button>)}
+          </div>
+          <h3 className="eyebrow">Caption</h3>
+          <input className="cap-in" value={caption} onChange={(e) => setCaption(e.target.value)} maxLength={48} placeholder="optional, e.g. sarah's 21st" aria-label="Scene caption" />
+          <button className="btn primary" onClick={dlScene} disabled={!!busy || !base}>Download square (2048 px)</button>
         </>)}
 
         <div className="exports">

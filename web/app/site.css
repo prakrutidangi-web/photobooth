@@ -563,3 +563,14 @@
 .selbox{margin:6px 0 12px;padding:10px 12px;border-radius:10px;background:#fbf4ec;border:1px dashed rgba(181,18,46,.35)}
 .selbox .colorrow{display:flex;align-items:center;gap:10px;font-size:.85rem;margin:4px 0}
 .selbox input[type=range]{flex:1}
+
+/* ---------- editor: square scene ---------- */
+.scene-cv{display:block;width:min(100%,640px);aspect-ratio:1;border-radius:6px;box-shadow:0 30px 60px -24px rgba(42,8,16,.5);background:#efe4d6;opacity:.55;transition:opacity .3s}
+.scene-cv.on{opacity:1}
+.scenes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.scene-t{display:grid;justify-items:center;gap:5px;padding:8px 4px;border:1px solid rgba(42,8,16,.12);border-radius:10px;background:#fff;font:inherit;font-size:.74rem;color:#2A0810;cursor:pointer}
+.scene-t i{width:100%;aspect-ratio:1.4;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(42,8,16,.12)}
+.scene-t[aria-pressed=true]{border-color:var(--cherry);box-shadow:0 0 0 1px var(--cherry);color:var(--cherry)}
+.cap-in{width:100%;padding:10px 12px;border-radius:10px;font:inherit}
+.panel-side .seg{flex-wrap:wrap}
+.tabs3{grid-template-columns:repeat(4,1fr)!important}

@@ -119,7 +119,7 @@ const family = (k: FontKey) => {
   }
   return famCache.get(k) ?? FONTS[k].fb;
 };
-const fontFor = (k: FontKey, px: number) => `${FONTS[k].w} ${px}px ${family(k)}`;
+export const fontFor = (k: FontKey, px: number) => `${FONTS[k].w} ${px}px ${family(k)}`;
 
 export type Item =
   | { id: number; type: 'sticker'; ch: string; x: number; y: number; s: number; r?: number }
